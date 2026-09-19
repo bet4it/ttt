@@ -42,11 +42,11 @@ Known boundary violations and explicit boundary decisions are documented there. 
 
 - **`internal/render/`** — Diff-based renderer: compares prev/curr cell grids and emits minimal updates
 
-- **`internal/terminal/`** — Integrated terminal emulator. Wraps `eugenioenko/vt10x` (a fork of `hinshun/vt10x`) for VT escape sequence parsing and `aymanbagabas/go-pty` for PTY lifecycle management. Provides the backing state for terminal tabs.
+- **`internal/terminal/`** — Integrated terminal emulator. Wraps `github.com/gitpod-io/xterm-go` for VT escape sequence parsing and `aymanbagabas/go-pty` for PTY lifecycle management. Provides the backing state for terminal tabs.
 
 - **`internal/term/`** — Terminal abstraction via `Screen` interface. `TcellScreen` is the real implementation. `MockScreen` supports unit-level `Screen` and renderer tests; `SimScreen` implements tcell's screen contract for composed E2E and chaos tests. Also defines `DirectColor` and `CellAttr` types for direct RGB color rendering (used by the terminal emulator to bypass the style map for 256-color support).
 
-- **`internal/ui/`** — Window manager and pane system. `Window` binds a `Rect`, `Viewport`, and `Buffer` together. `WindowManager` tracks focus across windows. Also contains `terminal_widget.go` (renders vt10x grid as direct-color cells, handles key-to-VT translation), `root.go` (ForceKeys and RawKeyConsumer interface for terminal key routing), and `content_split.go` (OnTopClick/OnBottomClick for focus routing between editor and bottom panel).
+- **`internal/ui/`** — Window manager and pane system. `Window` binds a `Rect`, `Viewport`, and `Buffer` together. `WindowManager` tracks focus across windows. Also contains `terminal_widget.go` (renders terminal grid as direct-color cells, handles key-to-VT translation), `root.go` (ForceKeys and RawKeyConsumer interface for terminal key routing), and `content_split.go` (OnTopClick/OnBottomClick for focus routing between editor and bottom panel).
 
 - **`internal/textwidth/`** — Display-width measurement (`Rune`, `String`, `Runes`). The single source of truth for how many terminal columns text occupies. Wraps `clipperhouse/displaywidth` with the same options tcell v3 uses internally, including the `RUNEWIDTH_EASTASIAN` toggle, so ttt's layout always matches what tcell draws.
 
@@ -272,7 +272,7 @@ Key external dependencies beyond the Go standard library:
 
 - `github.com/gdamore/tcell/v3` — terminal rendering
 - `github.com/aymanbagabas/go-pty` — PTY management for the integrated terminal
-- `github.com/eugenioenko/vt10x` — VT escape sequence parsing for the integrated terminal (fork of `hinshun/vt10x`)
+- `github.com/gitpod-io/xterm-go` — VT escape sequence parsing and terminal emulation for the integrated terminal
 - `github.com/alecthomas/chroma/v2` — syntax highlighting lexers
 - `github.com/yuin/gopher-lua` — Lua plugin engine
 - `github.com/yuin/goldmark` — Markdown rendering

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eugenioenko/vt10x"
+	"github.com/gitpod-io/xterm-go"
 )
 
 func newTestTerminal(t *testing.T) *Terminal {
@@ -52,12 +52,29 @@ func TestNewDefaultsScrollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	updated := make(chan struct{}, 100)
+	term.OnUpdate = func() {
+		select {
+		case updated <- struct{}{}:
+		default:
+		}
+	}
 	term.Run()
 	defer term.Close()
+
 	// A non-positive scrollbackMax must fall back to the default rather than
 	// producing a terminal with no history.
-	if term.vt == nil {
-		t.Fatal("expected vt to be initialized")
+	// Output more lines than the viewport height (24 rows) and assert that lines
+	// accumulate into scrollback.
+	term.WriteString("for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do echo line $i; done\n")
+
+	deadline := time.After(5 * time.Second)
+	for term.ScrollbackLen() <= 0 {
+		select {
+		case <-updated:
+		case <-deadline:
+			t.Fatalf("timed out waiting for scrollback lines to appear: ScrollbackLen() = %d", term.ScrollbackLen())
+		}
 	}
 }
 
@@ -169,8 +186,8 @@ func TestWriteStringAndReadLoopUpdatesView(t *testing.T) {
 	for !found {
 		select {
 		case <-updated:
-			term.Snapshot(func(v vt10x.View) {
-				if strings.Contains(v.String(), "hello_ttt_test") {
+			term.Snapshot(func(xt *xterm.Terminal) {
+				if strings.Contains(xt.String(), "hello_ttt_test") {
 					found = true
 				}
 			})
@@ -269,7 +286,7 @@ func TestPrimaryDeviceAttributesResponse(t *testing.T) {
 	for {
 		select {
 		case <-updated:
-			if strings.Contains(string(term.RawTail()), "\x1b[?6c") {
+			if strings.Contains(string(term.RawTail()), "\x1b[?1;2c") {
 				return
 			}
 		case <-deadline:

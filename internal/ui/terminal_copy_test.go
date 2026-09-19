@@ -124,3 +124,35 @@ func TestTerminalWidget_HandleEventCopyAndPaste(t *testing.T) {
 		t.Error("expected selection to be cleared when pasting with empty clipboard")
 	}
 }
+
+func TestTerminalWidget_SelectedTextNegativeBounds(t *testing.T) {
+	clipboard.DisableSystem()
+	term, err := terminal.New("/bin/cat", 20, 5, 1000, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.Run()
+
+	term.WriteString("hello world\n")
+	waitForTerminalOutput(t, term, "hello world")
+
+	tw := NewTerminalWidget(term, nil)
+	tw.SetRect(Rect{X: 0, Y: 0, W: 20, H: 5})
+
+	tw.hasSelection = true
+	tw.selAnchor = termSelPos{Line: 0, Col: -5}
+	tw.selCurrent = termSelPos{Line: 0, Col: -1}
+
+	got := tw.selectedText()
+	if got != "" {
+		t.Errorf("selectedText() = %q, want empty string", got)
+	}
+
+	tw.selAnchor = termSelPos{Line: 0, Col: -5}
+	tw.selCurrent = termSelPos{Line: 0, Col: 5}
+	got = tw.selectedText()
+	if got != "hello" {
+		t.Errorf("selectedText() = %q, want %q", got, "hello")
+	}
+}

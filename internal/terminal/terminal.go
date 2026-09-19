@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/aymanbagabas/go-pty"
-	"github.com/eugenioenko/vt10x"
+	"github.com/gitpod-io/xterm-go"
 )
 
 const (
@@ -22,7 +22,7 @@ const rawTailMax = 64 * 1024
 
 type Terminal struct {
 	mu         sync.Mutex
-	vt         vt10x.Terminal
+	term       *xterm.Terminal
 	pt         pty.Pty
 	cmd        *pty.Cmd
 	cols, rows int
@@ -56,11 +56,14 @@ func New(shell string, cols, rows, scrollbackMax int, env []string, dir string) 
 		return nil, err
 	}
 
-	t.vt = vt10x.New(
-		vt10x.WithWriter(pt),
-		vt10x.WithSize(cols, rows),
-		vt10x.WithScrollback(scrollbackMax),
+	t.term = xterm.New(
+		xterm.WithCols(cols),
+		xterm.WithRows(rows),
+		xterm.WithScrollback(scrollbackMax),
 	)
+	t.term.OnData(func(s string) {
+		io.WriteString(pt, s)
+	})
 
 	cmd := pt.Command(shell)
 	// Verify dir exists before setting it — chaos monkey and random commands can
@@ -142,7 +145,7 @@ func (t *Terminal) readLoop() {
 		n, err := t.pt.Read(buf)
 		if n > 0 {
 			t.mu.Lock()
-			t.vt.Write(buf[:n])
+			t.term.Write(buf[:n])
 			t.appendRawTail(buf[:n])
 			t.mu.Unlock()
 			if t.OnUpdate != nil {
@@ -167,21 +170,20 @@ func (t *Terminal) Resize(cols, rows int) {
 	defer t.mu.Unlock()
 	t.cols = cols
 	t.rows = rows
-	t.vt.Resize(cols, rows)
+	t.term.Resize(cols, rows)
 	t.pt.Resize(cols, rows)
 }
 
-func (t *Terminal) Snapshot(fn func(view vt10x.View)) {
+func (t *Terminal) Snapshot(fn func(term *xterm.Terminal)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	fn(t.vt)
+	fn(t.term)
 }
 
 func (t *Terminal) CursorPos() (x, y int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	c := t.vt.Cursor()
-	return c.X, c.Y
+	return t.term.CursorX(), t.term.CursorY()
 }
 
 func (t *Terminal) Size() (cols, rows int) {
@@ -215,13 +217,13 @@ func (t *Terminal) Close() {
 func (t *Terminal) ScrollbackLen() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.vt.ScrollbackLen()
+	return t.term.Buffer().YBase
 }
 
-func (t *Terminal) Mode() vt10x.ModeFlag {
+func (t *Terminal) DecPrivateModes() xterm.DecPrivateModes {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.vt.Mode()
+	return t.term.DecPrivateModes()
 }
 
 // appendRawTail must be called with t.mu held.
@@ -237,7 +239,7 @@ func (t *Terminal) appendRawTail(b []byte) {
 	t.rawTail = append(t.rawTail, b...)
 }
 
-// RawTail returns the most recent bytes read from the PTY, unparsed by vt10x.
+// RawTail returns the most recent bytes read from the PTY, unparsed by xterm.
 func (t *Terminal) RawTail() []byte {
 	t.mu.Lock()
 	defer t.mu.Unlock()
