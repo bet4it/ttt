@@ -2,14 +2,41 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags:
       - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  build:
+    name: Build (${{ matrix.asset_name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: ttt-linux-amd64
+            target: ""
+            features: "--no-default-features --features zlob"
+          - os: ubuntu-24.04-arm
+            asset_name: ttt-linux-arm64
+            target: ""
+            features: "--no-default-features --features zlob"
+          - os: macos-15-intel
+            asset_name: ttt-darwin-amd64
+            target: ""
+            features: "--no-default-features --features zlob"
+          - os: macos-latest
+            asset_name: ttt-darwin-arm64
+            target: ""
+            features: "--no-default-features --features zlob"
+          - os: windows-latest
+            asset_name: ttt-windows-amd64.exe
+            target: "x86_64-pc-windows-gnu"
+            features: "--features ripgrep"
 
     steps:
       - name: Checkout
@@ -18,31 +45,123 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: 'go.mod'
 
-      - name: Download modules
-        run: go mod download
+      - name: Set up Zig
+        if: runner.os != 'Windows'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
 
-      - name: Test
-        run: go test ./...
+      - name: Install cargo-c
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-c
 
-      - name: Build binaries
+      - name: Setup Windows MinGW & Rust target
+        if: runner.os == 'Windows'
+        shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME}
-          LDFLAGS="-s -w -X main.version=${VERSION}"
-          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o ttt-linux-amd64   ./cmd/ttt
-          CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o ttt-linux-arm64   ./cmd/ttt
-          CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o ttt-darwin-amd64  ./cmd/ttt
-          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o ttt-darwin-arm64  ./cmd/ttt
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o ttt-windows-amd64.exe ./cmd/ttt
+          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
+          echo "C:\msys64\usr\bin" >> $GITHUB_PATH
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Download fff latest release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SRC_DIR="${RUNNER_TEMP//\\//}/fff_src"
+          mkdir -p "${SRC_DIR}"
+          cd "${SRC_DIR}"
+          if command -v gh >/dev/null 2>&1; then
+            gh release download --repo dmtrKovalenko/fff --archive=tar.gz -O - | tar -xz --strip-components=1
+          else
+            TAG=$(curl -sIL -o /dev/null -w "%{url_effective}" https://github.com/dmtrKovalenko/fff/releases/latest | sed "s|.*/tag/||")
+            curl -sL "https://github.com/dmtrKovalenko/fff/archive/refs/tags/${TAG}.tar.gz" | tar -xz --strip-components=1
+          fi
+
+      - name: Install fff-c
+        shell: bash
+        run: |
+          SRC_DIR="${RUNNER_TEMP//\\//}/fff_src"
+          PREFIX="${RUNNER_TEMP//\\//}/fff_install"
+          cd "${SRC_DIR}"
+          TARGET_FLAG=""
+          if [ -n "${{ matrix.target }}" ]; then
+            TARGET_FLAG="--target ${{ matrix.target }}"
+          fi
+          cargo cinstall -p fff-c --release ${{ matrix.features }} ${TARGET_FLAG} --prefix="${PREFIX}" --libdir="${PREFIX}/lib" --includedir="${PREFIX}/include" --pkgconfigdir="${PREFIX}/lib/pkgconfig"
+
+      - name: Build ttt binary (static with fff)
+        shell: bash
+        run: |
+          PREFIX="${RUNNER_TEMP//\\//}/fff_install"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            export PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$PATH"
+            export CC=gcc
+            export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig;${PREFIX}/lib64/pkgconfig"
+          else
+            PKG_DIRS=$(find "${PREFIX}" -type d -name pkgconfig 2>/dev/null | tr '\n' ':')
+            export PKG_CONFIG_PATH="${PKG_DIRS}${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig:$PKG_CONFIG_PATH"
+          fi
+          export CGO_ENABLED=1
+
+          which pkg-config
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+          pkg-config --modversion fff_c
+          pkg-config --cflags --libs fff_c
+
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          MAKE_CMD="make"
+          if ! command -v make >/dev/null 2>&1 && command -v mingw32-make >/dev/null 2>&1; then
+            MAKE_CMD="mingw32-make"
+          fi
+          $MAKE_CMD build STATIC=1 VERSION="${VERSION}"
+
+          mkdir -p dist
+          if [ -f bin/ttt.exe ]; then
+            mv bin/ttt.exe "dist/${{ matrix.asset_name }}"
+          elif [ -f bin/ttt ]; then
+            mv bin/ttt "dist/${{ matrix.asset_name }}"
+            if command -v ldd >/dev/null 2>&1; then
+              ! ldd "dist/${{ matrix.asset_name }}" | grep -i fff
+            elif command -v otool >/dev/null 2>&1; then
+              ! otool -L "dist/${{ matrix.asset_name }}" | grep -i fff
+            fi
+          else
+            echo "Error: built binary not found"
+            exit 1
+          fi
+          ls -lh "dist/${{ matrix.asset_name }}"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            ttt-linux-amd64
-            ttt-linux-arm64
-            ttt-darwin-amd64
-            ttt-darwin-arm64
-            ttt-windows-amd64.exe
+            dist/ttt-linux-amd64
+            dist/ttt-linux-arm64
+            dist/ttt-darwin-amd64
+            dist/ttt-darwin-arm64
+            dist/ttt-windows-amd64.exe
