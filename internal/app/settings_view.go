@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -152,53 +153,79 @@ func settingsCategories() []settingsCategory {
 				GetInt: func(s *config.Settings) int { return s.Autocomplete.Debounce },
 				SetInt: func(s *config.Settings, v int) { s.Autocomplete.Debounce = v }},
 		}},
-		{Title: "Advanced", Fields: []settingField{
-			{Label: "Welcome page in home folder", Kind: settingBool,
-				GetBool: func(s *config.Settings) bool { return s.Welcome.ShowOnHome },
-				SetBool: func(s *config.Settings, v bool) { s.Welcome.ShowOnHome = v }},
-			{Label: "Recent folder history", Kind: settingBool,
-				GetBool: func(s *config.Settings) bool { return s.Welcome.IsRecentFoldersEnabled() },
-				SetBool: func(s *config.Settings, v bool) { s.Welcome.RecentFolders = boolPtr(v) }},
-			{Label: "Git: file view", Kind: settingEnum, Options: gitFileViewItems,
-				GetString: func(s *config.Settings) string { return s.Git.FileView },
-				SetString: func(s *config.Settings, v string) { s.Git.FileView = v }},
-			{Label: "Explorer: hidden files", Kind: settingBool,
-				GetBool: func(s *config.Settings) bool { return s.Explorer.ShowHidden },
-				SetBool: func(s *config.Settings, v bool) { s.Explorer.ShowHidden = v }},
-			{Label: "Explorer: git-ignored files", Kind: settingBool,
-				GetBool: func(s *config.Settings) bool { return s.Explorer.ShowGitIgnored },
-				SetBool: func(s *config.Settings, v bool) { s.Explorer.ShowGitIgnored = v }},
-			{Label: "Explorer: git status colors", Kind: settingBool,
-				GetBool: func(s *config.Settings) bool { return s.Explorer.GitStatusColors },
-				SetBool: func(s *config.Settings, v bool) { s.Explorer.GitStatusColors = v }},
-			{Label: "Explorer: dim staged colors", Kind: settingBool,
-				GetBool: func(s *config.Settings) bool { return s.Explorer.DimStagedGitColors },
-				SetBool: func(s *config.Settings, v bool) { s.Explorer.DimStagedGitColors = v }},
-			{Label: "Icons", Kind: settingEnum, Options: iconModeItems,
-				GetString: func(s *config.Settings) string { return s.Appearance.Icons },
-				SetString: func(s *config.Settings, v string) { s.Appearance.Icons = v }},
-			{Label: "Chevron: collapsed", Kind: settingString,
-				GetString: func(s *config.Settings) string { return s.Appearance.Chevrons.Collapsed },
-				SetString: func(s *config.Settings, v string) { s.Appearance.Chevrons.Collapsed = v }},
-			{Label: "Chevron: expanded", Kind: settingString,
-				GetString: func(s *config.Settings) string { return s.Appearance.Chevrons.Expanded },
-				SetString: func(s *config.Settings, v string) { s.Appearance.Chevrons.Expanded = v }},
-			{Label: "Terminal shell", Kind: settingString, Restart: true,
-				GetString: func(s *config.Settings) string { return s.Terminal.Shell },
-				SetString: func(s *config.Settings, v string) { s.Terminal.Shell = v }},
-			{Label: "Terminal scrollback", Kind: settingInt, Restart: true, Min: 1,
-				GetInt: func(s *config.Settings) int { return s.Terminal.Scrollback },
-				SetInt: func(s *config.Settings, v int) { s.Terminal.Scrollback = v }},
-			{Label: "Search debounce (ms)", Kind: settingInt,
-				GetInt: func(s *config.Settings) int { return s.Search.Debounce },
-				SetInt: func(s *config.Settings, v int) { s.Search.Debounce = v }},
-			{Label: "Enable plugins", Kind: settingBool, Restart: true,
-				GetBool: func(s *config.Settings) bool { return s.Plugins.IsEnabled() },
-				SetBool: func(s *config.Settings, v bool) { s.Plugins.Enabled = boolPtr(v) }},
-			{Label: "Debug mode", Kind: settingBool, Restart: true,
-				GetBool: func(s *config.Settings) bool { return s.DebugMode },
-				SetBool: func(s *config.Settings, v bool) { s.DebugMode = v }},
-		}},
+		{Title: "Advanced", Fields: advancedFields()},
+	}
+}
+
+func advancedFields() []settingField {
+	fields := []settingField{
+		{Label: "Welcome page in home folder", Kind: settingBool,
+			GetBool: func(s *config.Settings) bool { return s.Welcome.ShowOnHome },
+			SetBool: func(s *config.Settings, v bool) { s.Welcome.ShowOnHome = v }},
+		{Label: "Recent folder history", Kind: settingBool,
+			GetBool: func(s *config.Settings) bool { return s.Welcome.IsRecentFoldersEnabled() },
+			SetBool: func(s *config.Settings, v bool) { s.Welcome.RecentFolders = boolPtr(v) }},
+		{Label: "Git: file view", Kind: settingEnum, Options: gitFileViewItems,
+			GetString: func(s *config.Settings) string { return s.Git.FileView },
+			SetString: func(s *config.Settings, v string) { s.Git.FileView = v }},
+		{Label: "Explorer: hidden files", Kind: settingBool,
+			GetBool: func(s *config.Settings) bool { return s.Explorer.ShowHidden },
+			SetBool: func(s *config.Settings, v bool) { s.Explorer.ShowHidden = v }},
+		{Label: "Explorer: git-ignored files", Kind: settingBool,
+			GetBool: func(s *config.Settings) bool { return s.Explorer.ShowGitIgnored },
+			SetBool: func(s *config.Settings, v bool) { s.Explorer.ShowGitIgnored = v }},
+		{Label: "Explorer: git status colors", Kind: settingBool,
+			GetBool: func(s *config.Settings) bool { return s.Explorer.GitStatusColors },
+			SetBool: func(s *config.Settings, v bool) { s.Explorer.GitStatusColors = v }},
+		{Label: "Explorer: dim staged colors", Kind: settingBool,
+			GetBool: func(s *config.Settings) bool { return s.Explorer.DimStagedGitColors },
+			SetBool: func(s *config.Settings, v bool) { s.Explorer.DimStagedGitColors = v }},
+		{Label: "Icons", Kind: settingEnum, Options: iconModeItems,
+			GetString: func(s *config.Settings) string { return s.Appearance.Icons },
+			SetString: func(s *config.Settings, v string) { s.Appearance.Icons = v }},
+		{Label: "Chevron: collapsed", Kind: settingString,
+			GetString: func(s *config.Settings) string { return s.Appearance.Chevrons.Collapsed },
+			SetString: func(s *config.Settings, v string) { s.Appearance.Chevrons.Collapsed = v }},
+		{Label: "Chevron: expanded", Kind: settingString,
+			GetString: func(s *config.Settings) string { return s.Appearance.Chevrons.Expanded },
+			SetString: func(s *config.Settings, v string) { s.Appearance.Chevrons.Expanded = v }},
+		{Label: "Terminal shell", Kind: settingString, Restart: true,
+			GetString: func(s *config.Settings) string { return s.Terminal.Shell },
+			SetString: func(s *config.Settings, v string) { s.Terminal.Shell = v }},
+		{Label: "Terminal scrollback", Kind: settingInt, Restart: true, Min: 1,
+			GetInt: func(s *config.Settings) int { return s.Terminal.Scrollback },
+			SetInt: func(s *config.Settings, v int) { s.Terminal.Scrollback = v }},
+	}
+	if slices.Contains(config.SearchEngines(), config.SearchEngineFFF) {
+		fields = append(fields, settingField{
+			Label: "Search engine", Kind: settingEnum, Options: searchEngineItems,
+			GetString: func(s *config.Settings) string {
+				if s.Search.Engine == "" {
+					return config.SearchEngineFFF
+				}
+				return s.Search.Engine
+			},
+			SetString: func(s *config.Settings, v string) { s.Search.Engine = v },
+		})
+	}
+	fields = append(fields,
+		settingField{Label: "Search debounce (ms)", Kind: settingInt,
+			GetInt: func(s *config.Settings) int { return s.Search.Debounce },
+			SetInt: func(s *config.Settings, v int) { s.Search.Debounce = v }},
+		settingField{Label: "Enable plugins", Kind: settingBool, Restart: true,
+			GetBool: func(s *config.Settings) bool { return s.Plugins.IsEnabled() },
+			SetBool: func(s *config.Settings, v bool) { s.Plugins.Enabled = boolPtr(v) }},
+		settingField{Label: "Debug mode", Kind: settingBool, Restart: true,
+			GetBool: func(s *config.Settings) bool { return s.DebugMode },
+			SetBool: func(s *config.Settings, v bool) { s.DebugMode = v }},
+	)
+	return fields
+}
+
+func searchEngineItems() []widgets.SelectItem {
+	return []widgets.SelectItem{
+		{ID: config.SearchEngineFFF, Label: "fff"},
+		{ID: config.SearchEngineRipgrep, Label: "ripgrep"},
 	}
 }
 

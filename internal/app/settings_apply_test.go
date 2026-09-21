@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/eugenioenko/ttt/internal/command"
@@ -154,6 +155,41 @@ func TestCollapsedDiffEmphasisSettingLivesInAppearance(t *testing.T) {
 	}
 	if count != 1 || found != "Appearance" {
 		t.Fatalf("collapsed diff emphasis count = %d, category = %q; want one under Appearance", count, found)
+	}
+}
+
+func TestSearchEngineSettingLivesInAdvanced(t *testing.T) {
+	hasFff := slices.Contains(config.SearchEngines(), config.SearchEngineFFF)
+	found := ""
+	count := 0
+	for _, category := range settingsCategories() {
+		for _, field := range category.Fields {
+			if field.Label == "Search engine" {
+				found = category.Title
+				count++
+				if field.Kind != settingEnum {
+					t.Fatalf("search engine field kind = %v, want settingEnum", field.Kind)
+				}
+				items := field.Options()
+				if len(items) != 2 || items[0].ID != config.SearchEngineFFF || items[1].ID != config.SearchEngineRipgrep {
+					t.Fatalf("search engine options unexpected: %+v", items)
+				}
+				s := config.DefaultSettings()
+				field.SetString(&s, "ripgrep")
+				if got := field.GetString(&s); got != "ripgrep" {
+					t.Fatalf("search engine getter = %q, want ripgrep", got)
+				}
+			}
+		}
+	}
+	if hasFff {
+		if count != 1 || found != "Advanced" {
+			t.Fatalf("search engine setting count = %d, category = %q; want one under Advanced", count, found)
+		}
+	} else {
+		if count != 0 {
+			t.Fatalf("search engine setting should not exist when fff is unavailable, found count = %d", count)
+		}
 	}
 }
 
