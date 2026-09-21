@@ -1,6 +1,8 @@
 package app
 
 import (
+	"slices"
+
 	"github.com/eugenioenko/ttt/internal/command"
 	"github.com/eugenioenko/ttt/internal/config"
 	"github.com/eugenioenko/ttt/internal/term"
@@ -107,8 +109,20 @@ func (a *App) ApplySettings(s config.Settings) {
 		a.Screen.SetCursorStyle(term.ParseCursorStyle(s.Editor.CursorStyle))
 	}
 
-	// Apply search debounce
-	a.Search.Debounce.DelayMs = s.Search.Debounce
+	// Apply search settings
+	if a.Search != nil {
+		a.Search.Debounce.DelayMs = s.Search.Debounce
+		engine := s.Search.Engine
+		if engine == "" {
+			if slices.Contains(config.SearchEngines(), config.SearchEngineFFF) {
+				engine = config.SearchEngineFFF
+			} else {
+				engine = config.SearchEngineRipgrep
+			}
+		}
+		a.Search.Engine = engine
+		ui.SetFilelistEngine(s.Search.Engine)
+	}
 
 	if s.Editor.IsGitGutterEnabled() != prev.Editor.IsGitGutterEnabled() {
 		if s.Editor.IsGitGutterEnabled() {
