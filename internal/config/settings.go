@@ -5,6 +5,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/eugenioenko/ttt/internal/fff"
 	"github.com/eugenioenko/ttt/internal/textwidth"
 )
 
@@ -19,15 +20,25 @@ var (
 )
 
 const (
-	DiffModeSplit      = "split"
-	DiffModeUnified    = "unified"
-	DiffContextChanges = "changes"
-	DiffContextFull    = "full"
-	GitFileViewTree    = "tree"
-	GitFileViewList    = "list"
-	IconsNone          = "none"
-	IconsNerdFont      = "nerd-font"
+	DiffModeSplit       = "split"
+	DiffModeUnified     = "unified"
+	DiffContextChanges  = "changes"
+	DiffContextFull     = "full"
+	GitFileViewTree     = "tree"
+	GitFileViewList     = "list"
+	IconsNone           = "none"
+	IconsNerdFont       = "nerd-font"
+	SearchEngineFFF     = "fff"
+	SearchEngineRipgrep = "ripgrep"
 )
+
+// SearchEngines returns the list of search engines supported by the binary.
+func SearchEngines() []string {
+	if fff.Available() {
+		return []string{SearchEngineFFF, SearchEngineRipgrep}
+	}
+	return []string{SearchEngineRipgrep}
+}
 
 type TerminalSettings struct {
 	Shell      string `json:"shell,omitempty"`
@@ -157,7 +168,8 @@ func DefaultEditorSettings() EditorSettings {
 }
 
 type SearchSettings struct {
-	Debounce int `json:"debounce"`
+	Debounce int    `json:"debounce"`
+	Engine   string `json:"engine,omitempty"`
 }
 
 func DefaultSearchSettings() SearchSettings {
@@ -414,6 +426,9 @@ func normalizeSettings(s *Settings) {
 	}
 	if !slices.Contains(IconModes, s.Appearance.Icons) {
 		s.Appearance.Icons = IconsNone
+	}
+	if s.Search.Engine != "" && !slices.Contains(SearchEngines(), s.Search.Engine) {
+		s.Search.Engine = ""
 	}
 }
 

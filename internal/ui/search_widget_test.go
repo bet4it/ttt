@@ -1,9 +1,14 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/eugenioenko/ttt/internal/fff"
 )
 
 func TestRgFailureIgnoresNoMatches(t *testing.T) {
@@ -82,5 +87,70 @@ func TestSearchStartClearsError(t *testing.T) {
 	s.runSearchSync()
 	if s.Error != "" {
 		t.Errorf("Error = %q, want cleared when a new search starts", s.Error)
+	}
+}
+
+func TestSearchWidgetFffIntegration(t *testing.T) {
+	if !fff.Available() {
+		t.Skip("fff CGO is not available")
+	}
+
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSearchWidget()
+	s.WorkDirs = []string{repoRoot}
+	s.Input.Text = "streamFilesFff"
+
+	var lastBatch *SearchBatch
+	s.PostBatch = func(b *SearchBatch) {
+		lastBatch = b
+		s.ApplyBatch(b)
+	}
+
+	var groups []SearchFileGroup
+	s.streamFilesFff(context.Background(), 1, &groups)
+	if lastBatch == nil || !lastBatch.Done {
+		t.Fatal("expected done batch from streamFilesFff")
+	}
+	if len(groups) == 0 {
+		t.Fatal("expected search matches for 'streamFilesFff'")
+	}
+
+	found := false
+	for _, g := range groups {
+		for _, m := range g.Matches {
+			if strings.Contains(m.LineText, "streamFilesFff") {
+				found = true
+				if m.LineNum <= 0 {
+					t.Errorf("expected positive line number, got %d", m.LineNum)
+				}
+				if m.ColStart < 0 || m.ColEnd <= m.ColStart {
+					t.Errorf("invalid match column range: %d..%d", m.ColStart, m.ColEnd)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("expected to find streamFilesFff in search matches")
+	}
+}
+
+func TestSearchWidgetEngineRouting(t *testing.T) {
+	s := NewSearchWidget()
+	s.Engine = "ripgrep"
+	s.searchGen = 1
+	var lastBatch *SearchBatch
+	s.PostBatch = func(b *SearchBatch) {
+		lastBatch = b
+		s.ApplyBatch(b)
+	}
+
+	var groups []SearchFileGroup
+	s.streamFiles(context.Background(), 1, &groups)
+	if lastBatch == nil || !lastBatch.Done {
+		t.Fatal("expected done batch from streamFiles with ripgrep")
 	}
 }
