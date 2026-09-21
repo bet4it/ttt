@@ -3,6 +3,7 @@
 package fff
 
 /*
+#cgo pkg-config: fff_c
 #include <fff.h>
 #include <stdlib.h>
 */
