@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eugenioenko/ttt/internal/fff"
 	"github.com/eugenioenko/ttt/internal/term"
 
 	"github.com/gdamore/tcell/v3"
@@ -60,6 +61,7 @@ type SearchWidget struct {
 	ScrollTop    int
 	scrollbar    Scrollbar
 	WorkDirs     []string
+	Engine       string
 	Searching    bool
 	Error        string
 	DiffSources  func() []DiffSearchSource
@@ -88,6 +90,11 @@ type searchItem struct {
 
 func NewSearchWidget() *SearchWidget {
 	s := &SearchWidget{}
+	if fff.Available() {
+		s.Engine = "fff"
+	} else {
+		s.Engine = "ripgrep"
+	}
 	s.Input = NewInputWidget()
 	s.Input.Placeholder = "Search"
 	s.Include = NewInputWidget()
@@ -173,6 +180,11 @@ func (s *SearchWidget) FocusedInput() *InputWidget {
 
 func (s *SearchWidget) SetWorkDirs(dirs []string) {
 	s.WorkDirs = dirs
+	if fff.Available() && s.Engine != "ripgrep" {
+		for _, d := range dirs {
+			go fff.DefaultManager().GetOrInit(d)
+		}
+	}
 }
 
 func (s *SearchWidget) Focusable() bool { return true }
@@ -322,6 +334,133 @@ func (s *SearchWidget) ApplyBatch(batch *SearchBatch) {
 }
 
 func (s *SearchWidget) streamFiles(ctx context.Context, gen uint64, groups *[]SearchFileGroup) {
+	if s.Engine == "fff" && fff.Available() {
+		s.streamFilesFff(ctx, gen, groups)
+		return
+	}
+	s.streamFilesRg(ctx, gen, groups)
+}
+
+func (s *SearchWidget) streamFilesFff(ctx context.Context, gen uint64, groups *[]SearchFileGroup) {
+	if len(s.WorkDirs) == 0 {
+		s.sendBatch(&SearchBatch{Gen: gen, Groups: *groups, Done: true})
+		return
+	}
+
+	mode := fff.GrepModePlainText
+	if s.Options.UseRegex {
+		mode = fff.GrepModeRegex
+	}
+
+	var queryParts []string
+	for _, g := range strings.Split(s.Include.Text, ",") {
+		g = strings.TrimSpace(g)
+		if g != "" {
+			queryParts = append(queryParts, g)
+		}
+	}
+	for _, g := range strings.Split(s.Exclude.Text, ",") {
+		g = strings.TrimSpace(g)
+		if g != "" {
+			queryParts = append(queryParts, "!"+g)
+		}
+	}
+	queryParts = append(queryParts, s.Input.Text)
+	query := strings.Join(queryParts, " ")
+
+	opts := fff.LiveGrepOptions{
+		Mode:              mode,
+		SmartCase:         !s.Options.CaseSensitive,
+		MaxMatchesPerFile: 100,
+		PageLimit:         1000,
+		TimeBudgetMs:      2000,
+	}
+
+	groupMap := map[string]int{}
+	for i, g := range *groups {
+		groupMap[g.FilePath] = i
+	}
+
+	lastFlush := time.Now()
+	const flushInterval = 100 * time.Millisecond
+
+	for _, dir := range s.WorkDirs {
+		if ctx.Err() != nil {
+			return
+		}
+
+		inst, err := fff.DefaultManager().GetOrInit(dir)
+		if err != nil || inst == nil {
+			snapshot := make([]SearchFileGroup, len(*groups))
+			copy(snapshot, *groups)
+			s.sendBatch(&SearchBatch{Gen: gen, Groups: snapshot, Done: true, Error: fmt.Sprintf("fff initialization failed: %v", err)})
+			return
+		}
+		inst.WaitForScan(3 * time.Second)
+
+		res, err := inst.LiveGrep(query, opts)
+		if err != nil {
+			snapshot := make([]SearchFileGroup, len(*groups))
+			copy(snapshot, *groups)
+			s.sendBatch(&SearchBatch{Gen: gen, Groups: snapshot, Done: true, Error: "search failed: " + err.Error()})
+			return
+		}
+
+		for _, m := range res.Matches {
+			if ctx.Err() != nil {
+				return
+			}
+
+			absPath := filepath.Join(dir, m.RelativePath)
+			relPath := m.RelativePath
+			for _, d := range s.WorkDirs {
+				if r, err := filepath.Rel(d, absPath); err == nil && !strings.HasPrefix(r, "..") {
+					relPath = r
+					break
+				}
+			}
+
+			colStart := m.Col
+			colEnd := m.Col + len(s.Input.Text)
+			if len(m.MatchRanges) > 0 {
+				colStart = m.MatchRanges[0].Start
+				colEnd = m.MatchRanges[0].End
+			}
+
+			match := SearchMatch{
+				FilePath: absPath,
+				LineNum:  m.LineNumber,
+				ColStart: colStart,
+				ColEnd:   colEnd,
+				LineText: m.LineContent,
+			}
+
+			idx, ok := groupMap[absPath]
+			if !ok {
+				idx = len(*groups)
+				groupMap[absPath] = idx
+				*groups = append(*groups, SearchFileGroup{
+					FilePath: absPath,
+					RelPath:  relPath,
+					Expanded: true,
+				})
+			}
+			(*groups)[idx].Matches = append((*groups)[idx].Matches, match)
+			if time.Since(lastFlush) >= flushInterval {
+				snapshot := make([]SearchFileGroup, len(*groups))
+				copy(snapshot, *groups)
+				s.sendBatch(&SearchBatch{Gen: gen, Groups: snapshot})
+				lastFlush = time.Now()
+			}
+		}
+	}
+
+	snapshot := make([]SearchFileGroup, len(*groups))
+	copy(snapshot, *groups)
+	s.sendBatch(&SearchBatch{Gen: gen, Groups: snapshot, Done: true})
+}
+
+func (s *SearchWidget) streamFilesRg(ctx context.Context, gen uint64, groups *[]SearchFileGroup) {
 	if _, err := exec.LookPath("rg"); err != nil {
 		s.sendBatch(&SearchBatch{Gen: gen, Done: true, Error: "ripgrep (rg) not found"})
 		return
