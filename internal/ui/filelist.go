@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/eugenioenko/ttt/internal/fff"
 )
 
 const walkDirMaxFiles = 100000
@@ -23,7 +26,30 @@ func listWorkspaceFiles(workDirs []string) []paletteFile {
 	return files
 }
 
+var filelistEngine string
+
+// SetFilelistEngine sets the engine to use for file listing ("fff", "ripgrep").
+func SetFilelistEngine(engine string) {
+	filelistEngine = engine
+}
+
 func listDirFiles(workDir, prefix string) []paletteFile {
+	useFff := filelistEngine == "fff" || (filelistEngine == "" && fff.Available())
+	if useFff && fff.Available() {
+		if inst, err := fff.DefaultManager().GetOrInit(workDir); err == nil && inst != nil {
+			inst.WaitForScan(50 * time.Millisecond)
+			if relFiles, err := inst.ListFiles(walkDirMaxFiles); err == nil && len(relFiles) > 0 {
+				files := make([]paletteFile, len(relFiles))
+				for i, rel := range relFiles {
+					files[i] = paletteFile{
+						Rel: prefix + rel,
+						Abs: filepath.Join(workDir, rel),
+					}
+				}
+				return files
+			}
+		}
+	}
 	if _, err := exec.LookPath("rg"); err == nil {
 		if files, ok := listFilesCmdLines(workDir, prefix, "rg", "--files"); ok {
 			return files
