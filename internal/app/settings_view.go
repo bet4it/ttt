@@ -55,7 +55,7 @@ func boolPtr(b bool) *bool { return &b }
 
 // LSP servers and the formatters map are deliberately absent: both are
 // structured config that a form handles badly, and stay JSON-only.
-func settingsCategories() []settingsCategory {
+func settingsCategories(opts ...*config.Settings) []settingsCategory {
 	return []settingsCategory{
 		{Title: "Editor", Fields: []settingField{
 			{Label: "Tab size", Kind: settingInt, Min: 1,
@@ -153,11 +153,30 @@ func settingsCategories() []settingsCategory {
 				GetInt: func(s *config.Settings) int { return s.Autocomplete.Debounce },
 				SetInt: func(s *config.Settings, v int) { s.Autocomplete.Debounce = v }},
 		}},
-		{Title: "Advanced", Fields: advancedFields()},
+		{Title: "Advanced", Fields: advancedFields(opts...)},
 	}
 }
 
-func advancedFields() []settingField {
+func debounceSettingField() settingField {
+	return settingField{
+		Label: "Search debounce (ms)", Kind: settingInt, Min: 0,
+		GetInt: func(s *config.Settings) int { return s.Search.Debounce },
+		SetInt: func(s *config.Settings, v int) { s.Search.Debounce = v },
+	}
+}
+
+func advancedFields(opts ...*config.Settings) []settingField {
+	var s *config.Settings
+	if len(opts) > 0 {
+		s = opts[0]
+	}
+	engine := config.SearchEngineRipgrep
+	if s != nil {
+		engine = s.Search.EffectiveEngine()
+	} else if slices.Contains(config.SearchEngines(), config.SearchEngineFFF) {
+		engine = config.SearchEngineFFF
+	}
+
 	fields := []settingField{
 		{Label: "Welcome page in home folder", Kind: settingBool,
 			GetBool: func(s *config.Settings) bool { return s.Welcome.ShowOnHome },
@@ -197,18 +216,15 @@ func advancedFields() []settingField {
 		fields = append(fields, settingField{
 			Label: "Search engine", Kind: settingEnum, Options: searchEngineItems,
 			GetString: func(s *config.Settings) string {
-				if s.Search.Engine == "" {
-					return config.SearchEngineFFF
-				}
-				return s.Search.Engine
+				return s.Search.EffectiveEngine()
 			},
 			SetString: func(s *config.Settings, v string) { s.Search.Engine = v },
 		})
 	}
+	if engine != config.SearchEngineFFF {
+		fields = append(fields, debounceSettingField())
+	}
 	fields = append(fields,
-		settingField{Label: "Search debounce (ms)", Kind: settingInt,
-			GetInt: func(s *config.Settings) int { return s.Search.Debounce },
-			SetInt: func(s *config.Settings, v int) { s.Search.Debounce = v }},
 		settingField{Label: "Enable plugins", Kind: settingBool, Restart: true,
 			GetBool: func(s *config.Settings) bool { return s.Plugins.IsEnabled() },
 			SetBool: func(s *config.Settings, v bool) { s.Plugins.Enabled = boolPtr(v) }},
@@ -223,7 +239,6 @@ func searchEngineItems() []widgets.SelectItem {
 	return []widgets.SelectItem{
 		{ID: config.SearchEngineFFF, Label: "fff"},
 		{ID: config.SearchEngineRipgrep, Label: "ripgrep"},
->>>>>>> e3eef4f (feat(settings): add Search engine option to settings UI when fff is available)
 	}
 }
 
@@ -273,6 +288,12 @@ type settingsView struct {
 	status     *widgets.LabelWidget
 	inputs     []func() string
 	selects    []*widgets.SelectWidget
+
+	advancedStack   *widgets.VStackWidget
+	searchEngineRow widgets.Widget
+	debounceRow     widgets.Widget
+	debounceInput   *widgets.InputWidget
+	debounceField   settingField
 }
 
 // commitTo copies the fields this form owns out of the working copy and onto s,
@@ -292,6 +313,9 @@ func (v *settingsView) commitTo(s *config.Settings) {
 				f.SetString(s, f.GetString(&v.working))
 			}
 		}
+	}
+	if s.Search.EffectiveEngine() == config.SearchEngineFFF {
+		s.Search.Debounce = 0
 	}
 }
 
@@ -314,7 +338,11 @@ func (a *App) ShowSettings() {
 		return
 	}
 
-	v := &settingsView{app: a, working: *a.Settings, categories: settingsCategories()}
+	v := &settingsView{app: a, working: *a.Settings}
+	if v.working.Search.EffectiveEngine() == config.SearchEngineFFF {
+		v.working.Search.Debounce = 0
+	}
+	v.categories = settingsCategories(&v.working)
 	a.settingsView = v
 
 	tabItems := make([]widgets.TabItem, 0, len(v.categories))
@@ -354,12 +382,27 @@ func (a *App) ShowSettings() {
 func (v *settingsView) buildPane(cat settingsCategory) widgets.Widget {
 	rows := make([]widgets.Widget, 0, len(cat.Fields))
 	for _, f := range cat.Fields {
-		rows = append(rows, v.buildRow(cat.Title, f))
+		row := v.buildRow(cat.Title, f)
+		rows = append(rows, row)
+		if f.Label == "Search engine" {
+			v.searchEngineRow = row
+		}
+		if f.Label == "Search debounce (ms)" {
+			v.debounceRow = row
+		}
 	}
 	stack := widgets.NewVStackWidget(rows...)
 	stack.MeasureGrow = true
 	stack.Box.PaddingLeft = 1
 	stack.Box.PaddingTop = 1
+
+	if cat.Title == "Advanced" {
+		v.advancedStack = stack
+		if v.debounceRow == nil && slices.Contains(config.SearchEngines(), config.SearchEngineFFF) {
+			v.debounceField = debounceSettingField()
+			v.debounceRow = v.buildRow("Advanced", v.debounceField)
+		}
+	}
 
 	// The divider sits inside the pane so it reads as the tab strip's bottom
 	// border, and stays put while the fields scroll under it.
@@ -411,12 +454,86 @@ func (v *settingsView) enumControl(f settingField) widgets.Widget {
 		OnSelect: func(id string) {
 			f.SetString(&v.working, id)
 			sel.SetSelectedID(id)
+			if f.Label == "Search engine" {
+				v.onSearchEngineChanged(id)
+			}
 		},
 	})
 	v.selects = append(v.selects, sel)
 	sel.FixedWidth = settingsControlCols
 	sel.SetSelectedID(f.GetString(&v.working))
 	return sel
+}
+
+func (v *settingsView) onSearchEngineChanged(engine string) {
+	if v.advancedStack == nil || v.searchEngineRow == nil || v.debounceRow == nil {
+		return
+	}
+	if engine == config.SearchEngineFFF {
+		v.working.Search.Debounce = 0
+		newChildren := make([]widgets.Widget, 0, len(v.advancedStack.Children))
+		for _, child := range v.advancedStack.Children {
+			if child != v.debounceRow {
+				newChildren = append(newChildren, child)
+			}
+		}
+		v.advancedStack.Children = newChildren
+
+		for i := range v.categories {
+			if v.categories[i].Title == "Advanced" {
+				newFields := make([]settingField, 0, len(v.categories[i].Fields))
+				for _, f := range v.categories[i].Fields {
+					if f.Label != "Search debounce (ms)" {
+						newFields = append(newFields, f)
+					}
+				}
+				v.categories[i].Fields = newFields
+			}
+		}
+		if v.adapter != nil {
+			v.adapter.RebuildFocus()
+		}
+	} else if engine == config.SearchEngineRipgrep {
+		if v.working.Search.Debounce == 0 {
+			v.working.Search.Debounce = 350
+		}
+		if v.debounceInput != nil {
+			v.debounceInput.SetText(strconv.Itoa(v.working.Search.Debounce))
+		}
+		present := false
+		for _, child := range v.advancedStack.Children {
+			if child == v.debounceRow {
+				present = true
+				break
+			}
+		}
+		if !present {
+			newChildren := make([]widgets.Widget, 0, len(v.advancedStack.Children)+1)
+			for _, child := range v.advancedStack.Children {
+				newChildren = append(newChildren, child)
+				if child == v.searchEngineRow {
+					newChildren = append(newChildren, v.debounceRow)
+				}
+			}
+			v.advancedStack.Children = newChildren
+
+			for i := range v.categories {
+				if v.categories[i].Title == "Advanced" {
+					newFields := make([]settingField, 0, len(v.categories[i].Fields)+1)
+					for _, f := range v.categories[i].Fields {
+						newFields = append(newFields, f)
+						if f.Label == "Search engine" {
+							newFields = append(newFields, v.debounceField)
+						}
+					}
+					v.categories[i].Fields = newFields
+				}
+			}
+			if v.adapter != nil {
+				v.adapter.RebuildFocus()
+			}
+		}
+	}
 }
 
 // Text and numeric fields are parsed on Apply rather than per keystroke, so a
@@ -433,9 +550,16 @@ func (v *settingsView) textControl(category string, f settingField) widgets.Widg
 	// is affordance enough for a one-line field.
 	inp := widgets.NewInputWidget(widgets.InputConfig{})
 	inp.SetText(current)
+	if f.Label == "Search debounce (ms)" {
+		v.debounceInput = inp
+	}
 
 	// Returns a description of the offending field, or "" when the value is good.
 	v.inputs = append(v.inputs, func() string {
+		if f.Label == "Search debounce (ms)" && v.working.Search.EffectiveEngine() == config.SearchEngineFFF {
+			v.working.Search.Debounce = 0
+			return ""
+		}
 		text := inp.Text()
 		if f.Kind == settingString {
 			f.SetString(&v.working, text)
@@ -464,6 +588,9 @@ func (v *settingsView) apply() {
 	if len(bad) > 0 {
 		v.setStatus("Invalid value for " + strings.Join(bad, ", "))
 		return
+	}
+	if v.working.Search.EffectiveEngine() == config.SearchEngineFFF {
+		v.working.Search.Debounce = 0
 	}
 	v.commitTo(v.app.Settings)
 	v.app.SaveAndApplySettings()

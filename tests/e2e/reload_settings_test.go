@@ -61,8 +61,12 @@ func TestReloadSettingsCommand(t *testing.T) {
 	if !h.app.EditorGroup.TrimTrailingWhitespace {
 		t.Error("expected TrimTrailingWhitespace true after apply")
 	}
-	if h.app.Search.Debounce.DelayMs != 500 {
-		t.Errorf("expected search debounce 500 after apply, got %d", h.app.Search.Debounce.DelayMs)
+	expectedDebounce := 500
+	if h.app.Search.Engine == config.SearchEngineFFF {
+		expectedDebounce = 0
+	}
+	if h.app.Search.Debounce.DelayMs != expectedDebounce {
+		t.Errorf("expected search debounce %d after apply, got %d", expectedDebounce, h.app.Search.Debounce.DelayMs)
 	}
 
 	// Verify the settings pointer was updated

@@ -92,8 +92,10 @@ func NewSearchWidget() *SearchWidget {
 	s := &SearchWidget{}
 	if fff.Available() {
 		s.Engine = "fff"
+		s.Debounce.DelayMs = 0
 	} else {
 		s.Engine = "ripgrep"
+		s.Debounce.DelayMs = 350
 	}
 	s.Input = NewInputWidget()
 	s.Input.Placeholder = "Search"

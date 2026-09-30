@@ -2,7 +2,7 @@
   description = "TTT Editor: Terminal Text Tool";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "git+file:///home/user/Codes/nixpkgs?ref=fff-c";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -13,13 +13,16 @@
         version = self.shortRev or self.dirtyShortRev or "dev";
       in
       {
-        packages = {
+        packages = rec {
           ttt = pkgs.buildGoModule {
             pname = "ttt";
             inherit version;
             src = self;
             vendorHash = "sha256-UxT3zsTPsokAwMiMQ1fE5QTK+95GstaOUz8RlFJhfvQ=";
-                          
+
+            tags = [ "fff" ];
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = [ pkgs.fff-c ];
             ldflags = [
               "-s"
               "-w"
@@ -33,7 +36,7 @@
               mainProgram = "ttt";
             };
           };
-          default = self.packages.${system}.ttt;
+          default = ttt;
         };
       }
     );
