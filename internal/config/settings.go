@@ -181,7 +181,29 @@ type SearchSettings struct {
 	Engine   string `json:"engine,omitempty"`
 }
 
+func (s SearchSettings) EffectiveEngine() string {
+	if s.Engine != "" && slices.Contains(SearchEngines(), s.Engine) {
+		return s.Engine
+	}
+	if slices.Contains(SearchEngines(), SearchEngineFFF) {
+		return SearchEngineFFF
+	}
+	return SearchEngineRipgrep
+}
+
+func (s SearchSettings) EffectiveDebounce() int {
+	if s.EffectiveEngine() == SearchEngineFFF {
+		return 0
+	}
+	return s.Debounce
+}
+
 func DefaultSearchSettings() SearchSettings {
+	if slices.Contains(SearchEngines(), SearchEngineFFF) {
+		return SearchSettings{
+			Debounce: 0,
+		}
+	}
 	return SearchSettings{
 		Debounce: 350,
 	}
@@ -460,6 +482,9 @@ func normalizeSettings(s *Settings) {
 	}
 	if s.Search.Engine != "" && !slices.Contains(SearchEngines(), s.Search.Engine) {
 		s.Search.Engine = ""
+	}
+	if s.Search.EffectiveEngine() == SearchEngineFFF {
+		s.Search.Debounce = 0
 	}
 }
 

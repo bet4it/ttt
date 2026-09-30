@@ -1,8 +1,6 @@
 package app
 
 import (
-	"slices"
-
 	"github.com/eugenioenko/ttt/internal/command"
 	"github.com/eugenioenko/ttt/internal/config"
 	"github.com/eugenioenko/ttt/internal/term"
@@ -116,17 +114,14 @@ func (a *App) ApplySettings(s config.Settings) {
 
 	// Apply search settings
 	if a.Search != nil {
-		a.Search.Debounce.DelayMs = s.Search.Debounce
-		engine := s.Search.Engine
-		if engine == "" {
-			if slices.Contains(config.SearchEngines(), config.SearchEngineFFF) {
-				engine = config.SearchEngineFFF
-			} else {
-				engine = config.SearchEngineRipgrep
-			}
-		}
+		engine := s.Search.EffectiveEngine()
 		a.Search.Engine = engine
-		ui.SetFilelistEngine(s.Search.Engine)
+		ui.SetFilelistEngine(engine)
+		if engine == config.SearchEngineFFF {
+			a.Search.Debounce.DelayMs = 0
+		} else {
+			a.Search.Debounce.DelayMs = s.Search.Debounce
+		}
 	}
 
 	if s.Editor.IsGitGutterEnabled() != prev.Editor.IsGitGutterEnabled() {

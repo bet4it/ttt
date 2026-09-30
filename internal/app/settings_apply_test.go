@@ -106,20 +106,22 @@ func TestCommitToLeavesUnownedSettingsAlone(t *testing.T) {
 // Every field in the table must be reachable through commitTo, or an edit made
 // in the form would be silently dropped on Apply.
 func TestCommitToCoversEveryField(t *testing.T) {
-	for _, cat := range settingsCategories() {
-		for _, f := range cat.Fields {
-			switch f.Kind {
-			case settingBool:
-				if f.GetBool == nil || f.SetBool == nil {
-					t.Errorf("%s → %s: bool field missing an accessor", cat.Title, f.Label)
-				}
-			case settingInt:
-				if f.GetInt == nil || f.SetInt == nil {
-					t.Errorf("%s → %s: int field missing an accessor", cat.Title, f.Label)
-				}
-			default:
-				if f.GetString == nil || f.SetString == nil {
-					t.Errorf("%s → %s: string field missing an accessor", cat.Title, f.Label)
+	for _, s := range []*config.Settings{nil, {Search: config.SearchSettings{Engine: config.SearchEngineRipgrep}}} {
+		for _, cat := range settingsCategories(s) {
+			for _, f := range cat.Fields {
+				switch f.Kind {
+				case settingBool:
+					if f.GetBool == nil || f.SetBool == nil {
+						t.Errorf("%s → %s: bool field missing an accessor", cat.Title, f.Label)
+					}
+				case settingInt:
+					if f.GetInt == nil || f.SetInt == nil {
+						t.Errorf("%s → %s: int field missing an accessor", cat.Title, f.Label)
+					}
+				default:
+					if f.GetString == nil || f.SetString == nil {
+						t.Errorf("%s → %s: string field missing an accessor", cat.Title, f.Label)
+					}
 				}
 			}
 		}
@@ -290,5 +292,91 @@ func TestReopeningTinyPanelResetsSize(t *testing.T) {
 	a.ensureUsablePanelSize()
 	if a.ContentSplit.BottomH != 20 || a.ContentSplit.RightW != ui.DefaultPanelWidth {
 		t.Fatalf("panel size = %dx%d, want 20x%d", a.ContentSplit.BottomH, a.ContentSplit.RightW, ui.DefaultPanelWidth)
+	}
+}
+
+func TestSearchDebounceSettingOmittedWhenFff(t *testing.T) {
+	hasFff := slices.Contains(config.SearchEngines(), config.SearchEngineFFF)
+
+	// When engine is fff (if supported)
+	if hasFff {
+		s := config.DefaultSettings()
+		s.Search.Engine = config.SearchEngineFFF
+		for _, cat := range settingsCategories(&s) {
+			if cat.Title == "Advanced" {
+				for _, f := range cat.Fields {
+					if f.Label == "Search debounce (ms)" {
+						t.Errorf("Search debounce (ms) should not be present when engine is fff")
+					}
+				}
+			}
+		}
+	}
+
+	// When engine is ripgrep
+	s := config.DefaultSettings()
+	s.Search.Engine = config.SearchEngineRipgrep
+	foundDebounce := false
+	for _, cat := range settingsCategories(&s) {
+		if cat.Title == "Advanced" {
+			for _, f := range cat.Fields {
+				if f.Label == "Search debounce (ms)" {
+					foundDebounce = true
+				}
+			}
+		}
+	}
+	if !foundDebounce {
+		t.Errorf("Search debounce (ms) should be present when engine is ripgrep")
+	}
+}
+
+func TestSearchDebounceDynamicToggle(t *testing.T) {
+	if !slices.Contains(config.SearchEngines(), config.SearchEngineFFF) {
+		t.Skip("skipping test: fff is not available in this build")
+	}
+
+	a := buildTestApp(t, config.DefaultSettings())
+	a.ShowSettings()
+	v := a.settingsView
+	if v == nil {
+		t.Fatal("expected settingsView to be open")
+	}
+
+	// Initially on fff: debounceRow should not be in advancedStack.Children
+	for _, child := range v.advancedStack.Children {
+		if child == v.debounceRow {
+			t.Fatal("expected debounceRow to not be in advancedStack.Children initially on fff")
+		}
+	}
+	if v.working.Search.Debounce != 0 {
+		t.Fatalf("expected initial debounce to be 0 for fff, got %d", v.working.Search.Debounce)
+	}
+
+	// Switch to ripgrep
+	v.onSearchEngineChanged(config.SearchEngineRipgrep)
+	found := false
+	for _, child := range v.advancedStack.Children {
+		if child == v.debounceRow {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected debounceRow to be added to advancedStack.Children after switching to ripgrep")
+	}
+	if v.working.Search.Debounce != 350 {
+		t.Fatalf("expected debounce to be reset to 350 for ripgrep, got %d", v.working.Search.Debounce)
+	}
+
+	// Switch back to fff
+	v.onSearchEngineChanged(config.SearchEngineFFF)
+	for _, child := range v.advancedStack.Children {
+		if child == v.debounceRow {
+			t.Fatal("expected debounceRow to be removed from advancedStack.Children after switching to fff")
+		}
+	}
+	if v.working.Search.Debounce != 0 {
+		t.Fatalf("expected debounce to be 0 after switching back to fff, got %d", v.working.Search.Debounce)
 	}
 }

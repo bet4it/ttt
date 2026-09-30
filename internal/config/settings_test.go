@@ -272,8 +272,34 @@ func TestDefaultAutocompleteSettings(t *testing.T) {
 
 func TestDefaultSearchSettings(t *testing.T) {
 	ss := DefaultSearchSettings()
-	if ss.Debounce != 350 {
-		t.Errorf("expected Debounce 350, got %d", ss.Debounce)
+	if slices.Contains(SearchEngines(), SearchEngineFFF) {
+		if ss.Debounce != 0 {
+			t.Errorf("expected Debounce 0, got %d", ss.Debounce)
+		}
+	} else {
+		if ss.Debounce != 350 {
+			t.Errorf("expected Debounce 350, got %d", ss.Debounce)
+		}
+	}
+}
+
+func TestNormalizeSearchDebounceForEngine(t *testing.T) {
+	if slices.Contains(SearchEngines(), SearchEngineFFF) {
+		s := DefaultSettings()
+		s.Search.Engine = SearchEngineFFF
+		s.Search.Debounce = 350
+		normalizeSettings(&s)
+		if s.Search.Debounce != 0 {
+			t.Errorf("expected debounce normalized to 0 for fff, got %d", s.Search.Debounce)
+		}
+	}
+
+	s := DefaultSettings()
+	s.Search.Engine = SearchEngineRipgrep
+	s.Search.Debounce = 200
+	normalizeSettings(&s)
+	if s.Search.Debounce != 200 {
+		t.Errorf("expected debounce preserved for ripgrep, got %d", s.Search.Debounce)
 	}
 }
 
@@ -305,11 +331,20 @@ func TestReferenceSettingsMatchesDefaults(t *testing.T) {
 	refPath := filepath.Join(filepath.Dir(thisFile), "..", "..", "config", "settings.json")
 	refData, err := os.ReadFile(refPath)
 	if err != nil {
+		if data, err2 := os.ReadFile(filepath.Join("..", "..", "config", "settings.json")); err2 == nil {
+			refData = data
+			err = nil
+		}
+	}
+	if err != nil {
 		t.Fatalf("failed to read config/settings.json: %v", err)
 	}
 
 	s := DefaultSettings()
 	s.Theme = "default-dark"
+	if slices.Contains(SearchEngines(), SearchEngineFFF) {
+		s.Search.Debounce = 350
+	}
 	generated, _ := json.MarshalIndent(s, "", "  ")
 	generated = append(generated, '\n')
 

@@ -277,12 +277,15 @@ func BuildAppFromConfig(cfg *config.AppConfig, borders *term.BorderSet, ws *work
 	})
 
 	search := ui.NewSearchWidget()
-	if cfg.Settings.Search.Engine != "" {
-		search.Engine = cfg.Settings.Search.Engine
-		ui.SetFilelistEngine(cfg.Settings.Search.Engine)
-	}
+	engine := cfg.Settings.Search.EffectiveEngine()
+	search.Engine = engine
+	ui.SetFilelistEngine(engine)
 	search.SetWorkDirs(ws.Paths())
-	search.Debounce.DelayMs = cfg.Settings.Search.Debounce
+	if engine == config.SearchEngineFFF {
+		search.Debounce.DelayMs = 0
+	} else {
+		search.Debounce.DelayMs = cfg.Settings.Search.Debounce
+	}
 	changes := NewChangesPanel(ws.Paths()...)
 	changes.SetFileView(cfg.Settings.Git.FileView)
 	changes.SetIcons(cfg.Settings.Appearance.Icons)
